@@ -6,13 +6,16 @@ class SettingsStore {
     var ispCookies: String { didSet { ud("ispCookies", ispCookies) } }
     var ispBaseURL: String { didSet { ud("ispBaseURL", ispBaseURL) } }
     var concurrency: Int   { didSet { UserDefaults.standard.set(concurrency, forKey: "concurrency") } }
+    var batchSize: Int     { didSet { UserDefaults.standard.set(batchSize,   forKey: "batchSize") } }
 
     init() {
         let d = UserDefaults.standard
         ispCookies  = d.string(forKey: "ispCookies")  ?? ""
         ispBaseURL  = d.string(forKey: "ispBaseURL")  ?? "https://isp.hec.net.sap"
-        concurrency = d.integer(forKey: "concurrency")
-        if concurrency < 1 { concurrency = 3 }
+        let c = d.integer(forKey: "concurrency")
+        concurrency = c < 1 ? 3 : c
+        let b = d.integer(forKey: "batchSize")
+        batchSize   = b < 1 || b > 8 ? 8 : b
     }
 
     var isComplete: Bool { !ispCookies.isEmpty && !ispBaseURL.isEmpty }

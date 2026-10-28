@@ -85,66 +85,70 @@ class LookupViewModel {
         results = serials.map { EquipmentRecord.stub(serialNumber: $0) }
         statusMessage = "Looking up \(serials.count) serial\(serials.count == 1 ? "" : "s")…"
 
+        let batchSize = max(1, settings.batchSize)
         let concurrency = max(1, settings.concurrency)
         var completed = 0
 
-        await withTaskGroup(of: (Int, EquipmentRecord).self) { group in
-            var inFlight = 0
-            var serialIndex = 0
+        // Chunk serials into groups of up to batchSize.
+        // Each chunk is submitted as a single IH08 multiple-selection batch call.
+        let chunks: [(startIdx: Int, serials: [String])] = stride(from: 0, to: serials.count, by: batchSize).map { start in
+            let end = min(start + batchSize, serials.count)
+            return (startIdx: start, serials: Array(serials[start..<end]))
+        }
 
-            func addNext() {
-                guard serialIndex < serials.count, inFlight < concurrency else { return }
-                let idx = serialIndex
-                let sn  = serials[idx]
-                serialIndex += 1
+        await withTaskGroup(of: [(Int, EquipmentRecord)].self) { group in
+            var inFlight = 0
+            var chunkIndex = 0
+
+            func addNextChunk() {
+                guard chunkIndex < chunks.count, inFlight < concurrency else { return }
+                let chunk = chunks[chunkIndex]
+                chunkIndex += 1
                 inFlight += 1
                 group.addTask {
                     if Task.isCancelled {
-                        var r = EquipmentRecord.stub(serialNumber: sn)
-                        r.queryStatus = .error
-                        r.error = "Cancelled"
-                        return (idx, r)
+                        return chunk.serials.enumerated().map { (i, sn) in
+                            var r = EquipmentRecord.stub(serialNumber: sn)
+                            r.queryStatus = .error
+                            r.error = "Cancelled"
+                            return (chunk.startIdx + i, r)
+                        }
                     }
-                    // Each lookup gets its own ephemeral URLSession so the shared
-                    // cookie store never leaks stale SAP_SESSIONID across lookups.
+                    // Each batch chunk gets its own ephemeral URLSession (fresh SAP session).
                     let taskSession = URLSession(configuration: .ephemeral)
                     do {
                         let sessionInfo = try await ISPEquipmentService.acquireToken(
                             settings: settings, session: taskSession)
-                        return (idx, try await ISPEquipmentService.lookup(
-                            serialNumber: sn, sessionInfo: sessionInfo,
-                            settings: settings, session: taskSession))
-                    } catch ISPEquipmentService.ServiceError.notFound {
-                        var r = EquipmentRecord.stub(serialNumber: sn)
-                        r.equipmentNumber = "i8pi8pi8p"
-                        r.queryStatus = .notFound
-                        return (idx, r)
-                    } catch ISPEquipmentService.ServiceError.restricted(let equip) {
-                        var r = EquipmentRecord.stub(serialNumber: sn)
-                        r.equipmentNumber = equip
-                        r.queryStatus = .restricted
-                        r.error = "Authorization restricted"
-                        return (idx, r)
+                        let records = try await ISPEquipmentService.batchLookup(
+                            serialNumbers: chunk.serials, sessionInfo: sessionInfo,
+                            settings: settings, session: taskSession)
+                        return records.enumerated().map { (i, r) in
+                            (chunk.startIdx + i, r)
+                        }
                     } catch {
-                        var r = EquipmentRecord.stub(serialNumber: sn)
-                        r.queryStatus = .error
-                        r.error = error.localizedDescription
-                        return (idx, r)
+                        return chunk.serials.enumerated().map { (i, sn) in
+                            var r = EquipmentRecord.stub(serialNumber: sn)
+                            r.queryStatus = .error
+                            r.error = error.localizedDescription
+                            return (chunk.startIdx + i, r)
+                        }
                     }
                 }
             }
 
-            // Seed initial batch
-            for _ in 0..<concurrency { addNext() }
+            // Seed initial concurrent chunks
+            for _ in 0..<concurrency { addNextChunk() }
 
-            for await (idx, record) in group {
+            for await pairs in group {
                 if Task.isCancelled { break }
-                results[idx] = record
-                completed += 1
+                for (idx, record) in pairs {
+                    results[idx] = record
+                }
+                completed += pairs.count
                 inFlight   -= 1
                 progress    = Double(completed) / Double(serials.count)
                 statusMessage = "Done \(completed)/\(serials.count)"
-                addNext()
+                addNextChunk()
             }
         }
 
@@ -182,7 +186,7 @@ class LookupViewModel {
     private(set) var importedSerials: [String] = []
     private(set) var importedCount: Int = 0
 
-    func importCSV(url: URL) {
+    func importCSV(url: URL, settings: SettingsStore? = nil) {
         guard let raw = try? String(contentsOf: url, encoding: .utf8) else {
             errorMessage = "Could not read file."; return
         }
@@ -216,6 +220,9 @@ class LookupViewModel {
         importedCount = importedSerials.count
         statusMessage  = "Imported \(importedCount) serial\(importedCount == 1 ? "" : "s") from file."
         sourceMode     = .csvImport
+        if let settings = settings {
+            run(settings: settings)
+        }
     }
 
     private func parseCSVLine(_ line: String) -> [String] {

@@ -65,6 +65,12 @@ struct SettingsView: View {
                                 .frame(width: 160, alignment: .trailing)
                             Stepper("\(s.concurrency)", value: $s.concurrency, in: 1...10)
                         }
+                        HStack {
+                            Text("Serials per batch")
+                                .font(.callout).foregroundStyle(.secondary)
+                                .frame(width: 160, alignment: .trailing)
+                            Stepper("\(s.batchSize)", value: $s.batchSize, in: 1...8)
+                        }
                     }
                 }
                 .padding(20)

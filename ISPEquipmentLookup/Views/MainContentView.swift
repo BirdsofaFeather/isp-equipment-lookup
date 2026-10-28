@@ -168,7 +168,7 @@ struct SourcePickerView: View {
                         panel.allowsMultipleSelection = false
                         panel.begin { response in
                             guard response == .OK, let url = panel.url else { return }
-                            vm.importCSV(url: url)
+                            vm.importCSV(url: url, settings: appState.settings)
                         }
                     } label: {
                         Label("Choose File…", systemImage: "doc.text")

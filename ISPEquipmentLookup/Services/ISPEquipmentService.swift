@@ -429,6 +429,201 @@ struct ISPEquipmentService {
         return rows
     }
 
+    // MARK: - Batch multi-serial lookup (IH08 multiple-selection)
+
+    // Submit serial numbers in a single IH08 batch round-trip using the
+    // Manuf. Serial Number multiple-selection dialog (SLOW_I table).
+    // The selection table supports hundreds of rows; callers should chunk
+    // at whatever size gives acceptable response times in practice.
+    static func batchLookup(serialNumbers: [String], sessionInfo: SessionInfo,
+                            settings: SettingsStore,
+                            session: URLSession) async throws -> [EquipmentRecord] {
+        let base = settings.ispBaseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        _ = try? await postBatch(payload: [["get": "state/ur"]], sessionInfo: sessionInfo,
+                                  base: base, session: session)
+
+        // Build payload:
+        //   1. Open the multiple-selection dialog via the SERGE field's selection button
+        //   2. Fill rows [1,0]..[1,N-1] with each serial in the SLOW_I table
+        //   3. Set cursor on row [1,0] so SAP registers the last entry
+        //   4. Execute (F8 = btn[8]) to close popup and apply selection
+        //   5. Execute IH08 search (F8 = vkey/8) to run the query
+        //   6. Get result state
+        var payload: [[String: String]] = []
+
+        // Open multiple-selection popup for the Manuf. Serial Number (SERGE) field
+        payload.append(["post": "action/3/wnd[0]/usr/btn%_SERGE_%_APP_%-VALU_PUSH"])
+
+        // Fill each serial number row in the SLOW_I table
+        let fieldBase = "wnd[1]/usr/tabsTAB_STRIP/tabpSIVA/ssubSCREEN_HEADER:SAPLALDB:3010/tblSAPLALDBSINGLE/txtRSCSEL_255-SLOW_I"
+        for (row, serial) in serialNumbers.enumerated() {
+            payload.append([
+                "post": "value/\(fieldBase)[1,\(row)]",
+                "content": serial,
+            ])
+        }
+
+        // Set focus to row 0 so SAP registers the last entry
+        payload.append(["post": "focus/\(fieldBase)[1,0]"])
+
+        // Execute F8 to submit the selection and close the popup
+        payload.append(["post": "action/3/wnd[1]/tbar[0]/btn[8]"])
+
+        // Now on IH08 selection screen with serials filled in — execute the search (F8)
+        payload.append(["post": "vkey/8/ses[0]"])
+
+        // Get resulting IH08 results list
+        payload.append(["get": "state/ur"])
+
+        let xml = try await postBatch(payload: payload, sessionInfo: sessionInfo,
+                                      base: base, session: session)
+
+        let safeName = serialNumbers.first?.replacingOccurrences(of: "/", with: "_") ?? "batch"
+        try? xml.write(toFile: "/tmp/isp_batch_\(safeName).xml", atomically: true, encoding: .utf8)
+
+        // If the result is an IH08 ALV grid, extract all equipment rows
+        if isALVListScreen(xml: xml) || isIH08ResultScreen(xml: xml) {
+            let alvRows = extractALVBatchRows(from: xml)
+            return correlateSerials(serialNumbers, to: alvRows)
+        }
+
+        // If the result is a single IE03 screen (only one match total), parse it
+        // and correlate back to the one serial that matched.
+        if xml.contains("id=\"M0:46:1:1::0:16\"") || xml.contains("M0:46:1:1::0:16") {
+            let record = try parseResponse(xml: xml, requestedSerial: serialNumbers.first ?? "", restrictedReason: nil)
+            return serialNumbers.map { sn in
+                if sn.caseInsensitiveCompare(record.serialNumber) == .orderedSame
+                    || record.serialNumber.isEmpty {
+                    return record
+                }
+                var r = EquipmentRecord.stub(serialNumber: sn)
+                r.equipmentNumber = "i8pi8pi8p"
+                r.queryStatus = .notFound
+                return r
+            }
+        }
+
+        // Nothing matched — all serials not found
+        return serialNumbers.map { sn in
+            var r = EquipmentRecord.stub(serialNumber: sn)
+            r.equipmentNumber = "i8pi8pi8p"
+            r.queryStatus = .notFound
+            return r
+        }
+    }
+
+    // Returns true when SAP shows the IH08 results list (SAPMIEF0 / IH08 program).
+    // This is different from a generic ALV fullscreen — it's the IH08 equipment list.
+    private static func isIH08ResultScreen(xml: String) -> Bool {
+        xml.contains("dynpro:'SAPMIEF0'") || xml.contains("dynpro:\"SAPMIEF0\"") ||
+        xml.contains("SAPMIEF0")
+    }
+
+    struct ALVBatchRow {
+        let equipmentNumber: String
+        let serialNumber: String    // Manuf. serial number from the ALV column
+        let description: String
+        let userId: String
+        let manufacturer: String
+        let rowIndex: Int
+    }
+
+    // Extract equipment and serial data from the IH08 ALV results grid (SAPLSLVC_FULLSCREEN).
+    //
+    // All cells share table id C105. The positional column index (second number in
+    // grid#C105#ROW,COL#if) maps to IH08 fields:
+    //   col 2  = Equipment number
+    //   col 3  = Description
+    //   col 4  = Manuf. Serial Number
+    //   col 9  = User ID
+    //   col 22 = Manufacturer
+    private static func extractALVBatchRows(from xml: String) -> [ALVBatchRow] {
+        let html = extractCDATA(from: xml)
+        var rows: [ALVBatchRow] = []
+
+        guard let regex = try? NSRegularExpression(
+            pattern: #"id="grid#C105#(\d+),(\d+)#if"[^>]{0,600}lsdata='(\{[^']+\})'"#,
+            options: .dotMatchesLineSeparators) else { return rows }
+
+        // rowData[rowIndex][colPosition] = cellValue
+        var rowData: [Int: [Int: String]] = [:]
+        let range = NSRange(html.startIndex..., in: html)
+        regex.enumerateMatches(in: html, range: range) { match, _, _ in
+            guard let match = match,
+                  let rowIdxRange = Range(match.range(at: 1), in: html),
+                  let colPosRange = Range(match.range(at: 2), in: html),
+                  let ldRange     = Range(match.range(at: 3), in: html)
+            else { return }
+
+            let rowIdx = Int(html[rowIdxRange]) ?? 0
+            let colPos = Int(html[colPosRange]) ?? 0
+            let lsdata = htmlUnescape(String(html[ldRange]))
+
+            guard let valMatch = try? NSRegularExpression(pattern: #""5":"([^"]+)""#)
+                    .firstMatch(in: lsdata, range: NSRange(lsdata.startIndex..., in: lsdata)),
+                  let valRange = Range(valMatch.range(at: 1), in: lsdata)
+            else { return }
+
+            let value = String(lsdata[valRange]).trimmingCharacters(in: .whitespaces)
+            if !value.isEmpty {
+                if rowData[rowIdx] == nil { rowData[rowIdx] = [:] }
+                rowData[rowIdx]![colPos] = value
+            }
+        }
+
+        for (rowIdx, cols) in rowData.sorted(by: { $0.key < $1.key }) {
+            let equipNum = cols[2] ?? ""
+            let serial   = cols[4] ?? ""
+            guard !equipNum.isEmpty, equipNum.range(of: #"^\d{6,12}$"#, options: .regularExpression) != nil
+            else { continue }
+            rows.append(ALVBatchRow(
+                equipmentNumber: equipNum,
+                serialNumber:    serial,
+                description:     cols[3] ?? "",
+                userId:          cols[9] ?? "",
+                manufacturer:    cols[22] ?? "",
+                rowIndex:        rowIdx
+            ))
+        }
+
+        return rows
+    }
+
+    // Match ALV result rows back to the requested serial numbers.
+    private static func correlateSerials(_ serials: [String], to alvRows: [ALVBatchRow]) -> [EquipmentRecord] {
+        serials.map { sn in
+            if let match = alvRows.first(where: {
+                $0.serialNumber.caseInsensitiveCompare(sn) == .orderedSame ||
+                $0.serialNumber.uppercased().hasSuffix(sn.uppercased()) ||
+                sn.uppercased().hasSuffix($0.serialNumber.uppercased())
+            }) {
+                return EquipmentRecord(
+                    serialNumber:       sn,
+                    equipmentNumber:    match.equipmentNumber,
+                    description:        match.description,
+                    userId:             match.userId,
+                    manufacturer:       match.manufacturer,
+                    modelNumber:        "",
+                    acquisitionDate:    "",
+                    acquisitionValue:   "",
+                    currency:           "",
+                    inventoryNo:        "",
+                    systemStatus:       "",
+                    userStatus:         "",
+                    objectType:         "",
+                    manufacturerPartNo: "",
+                    validFrom:          "",
+                    category:           "",
+                    queryStatus:        .found)
+            } else {
+                var r = EquipmentRecord.stub(serialNumber: sn)
+                r.equipmentNumber = "i8pi8pi8p"
+                r.queryStatus = .notFound
+                return r
+            }
+        }
+    }
+
     static func parseResponse(xml: String, requestedSerial: String,
                               restrictedReason: String?) throws -> EquipmentRecord {
         let html = extractCDATA(from: xml)
