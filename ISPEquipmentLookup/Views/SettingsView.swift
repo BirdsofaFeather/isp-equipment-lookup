@@ -71,6 +71,16 @@ struct SettingsView: View {
                                 .frame(width: 160, alignment: .trailing)
                             Stepper("\(s.batchSize)", value: $s.batchSize, in: 1...8)
                         }
+                        HStack {
+                            Text("Detail level")
+                                .font(.callout).foregroundStyle(.secondary)
+                                .frame(width: 160, alignment: .trailing)
+                            Toggle(isOn: $s.fetchFullDetail) {
+                                Text(s.fetchFullDetail ? "Full (Model, Dates, Value, Status)" : "List only (Equipment #, Description, User)")
+                                    .font(.callout)
+                            }
+                            .toggleStyle(.switch)
+                        }
                     }
                 }
                 .padding(20)

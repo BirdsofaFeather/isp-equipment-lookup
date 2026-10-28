@@ -5,17 +5,19 @@ class SettingsStore {
     // Stored in UserDefaults
     var ispCookies: String { didSet { ud("ispCookies", ispCookies) } }
     var ispBaseURL: String { didSet { ud("ispBaseURL", ispBaseURL) } }
-    var concurrency: Int   { didSet { UserDefaults.standard.set(concurrency, forKey: "concurrency") } }
-    var batchSize: Int     { didSet { UserDefaults.standard.set(batchSize,   forKey: "batchSize") } }
+    var concurrency: Int   { didSet { UserDefaults.standard.set(concurrency,   forKey: "concurrency") } }
+    var batchSize: Int     { didSet { UserDefaults.standard.set(batchSize,     forKey: "batchSize") } }
+    var fetchFullDetail: Bool { didSet { UserDefaults.standard.set(fetchFullDetail, forKey: "fetchFullDetail") } }
 
     init() {
         let d = UserDefaults.standard
-        ispCookies  = d.string(forKey: "ispCookies")  ?? ""
-        ispBaseURL  = d.string(forKey: "ispBaseURL")  ?? "https://isp.hec.net.sap"
+        ispCookies      = d.string(forKey: "ispCookies")  ?? ""
+        ispBaseURL      = d.string(forKey: "ispBaseURL")  ?? "https://isp.hec.net.sap"
         let c = d.integer(forKey: "concurrency")
-        concurrency = c < 1 ? 3 : c
+        concurrency     = c < 1 ? 3 : c
         let b = d.integer(forKey: "batchSize")
-        batchSize   = b < 1 || b > 8 ? 8 : b
+        batchSize       = b < 1 || b > 8 ? 8 : b
+        fetchFullDetail = d.object(forKey: "fetchFullDetail") == nil ? true : d.bool(forKey: "fetchFullDetail")
     }
 
     var isComplete: Bool { !ispCookies.isEmpty && !ispBaseURL.isEmpty }
