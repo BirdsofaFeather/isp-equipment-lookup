@@ -3,6 +3,7 @@ import SwiftUI
 struct SettingsView: View {
     @Environment(AppState.self) private var appState
     @Environment(\.dismiss) private var dismiss
+    @State private var showWebLogin = false
 
     var body: some View {
         @Bindable var s = appState.settings
@@ -27,11 +28,21 @@ struct SettingsView: View {
                     }
 
                     SettingsSection(title: "Session Cookies") {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("Paste the Cookie header value from your browser's network inspector while logged into SAP ISP WebGUI.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack(alignment: .top) {
+                                Text("Sign in via browser (experimental — may not work with device compliance SSO) or paste cookies manually from your browser's network inspector.")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                Spacer()
+                                Button {
+                                    showWebLogin = true
+                                } label: {
+                                    Label("Sign In…", systemImage: "globe")
+                                        .font(.caption)
+                                }
+                                .disabled(s.ispBaseURL.isEmpty)
+                            }
 
                             TextEditor(text: $s.ispCookies)
                                 .font(.system(.caption, design: .monospaced))
@@ -68,6 +79,10 @@ struct SettingsView: View {
             .padding(.horizontal, 20).padding(.vertical, 12)
         }
         .frame(width: 520, height: 480)
+        .sheet(isPresented: $showWebLogin) {
+            WebViewLoginSheet()
+                .environment(appState)
+        }
     }
 }
 

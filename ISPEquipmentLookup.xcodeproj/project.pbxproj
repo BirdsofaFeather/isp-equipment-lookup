@@ -16,6 +16,7 @@
 		B007 /* MainContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A007 /* MainContentView.swift */; };
 		B008 /* EquipmentTableView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A008 /* EquipmentTableView.swift */; };
 		B009 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A009 /* SettingsView.swift */; };
+		B020 /* WebViewLoginSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A020 /* WebViewLoginSheet.swift */; };
 		B010 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A010 /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
@@ -29,6 +30,7 @@
 		A007 /* MainContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainContentView.swift; sourceTree = "<group>"; };
 		A008 /* EquipmentTableView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EquipmentTableView.swift; sourceTree = "<group>"; };
 		A009 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		A020 /* WebViewLoginSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebViewLoginSheet.swift; sourceTree = "<group>"; };
 		A010 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A011 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A012 /* ISPEquipmentLookup.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ISPEquipmentLookup.entitlements; sourceTree = "<group>"; };
@@ -109,6 +111,7 @@
 				A007 /* MainContentView.swift */,
 				A008 /* EquipmentTableView.swift */,
 				A009 /* SettingsView.swift */,
+				A020 /* WebViewLoginSheet.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -191,6 +194,7 @@
 				B007 /* MainContentView.swift in Sources */,
 				B008 /* EquipmentTableView.swift in Sources */,
 				B009 /* SettingsView.swift in Sources */,
+				B020 /* WebViewLoginSheet.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
