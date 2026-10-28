@@ -118,6 +118,12 @@ class LookupViewModel {
                         var r = EquipmentRecord.stub(serialNumber: sn)
                         r.queryStatus = .notFound
                         return (idx, r)
+                    } catch ISPEquipmentService.ServiceError.restricted(let equip) {
+                        var r = EquipmentRecord.stub(serialNumber: sn)
+                        r.equipmentNumber = equip
+                        r.queryStatus = .restricted
+                        r.error = "Authorization restricted"
+                        return (idx, r)
                     } catch {
                         var r = EquipmentRecord.stub(serialNumber: sn)
                         r.queryStatus = .error
@@ -141,10 +147,14 @@ class LookupViewModel {
             }
         }
 
-        let foundCount = results.filter { $0.queryStatus == .found }.count
-        let errCount   = results.filter { $0.queryStatus == .error }.count
-        let nfCount    = results.filter { $0.queryStatus == .notFound }.count
-        statusMessage = "Complete — Found: \(foundCount)  Not found: \(nfCount)  Errors: \(errCount)"
+        let foundCount  = results.filter { $0.queryStatus == .found }.count
+        let restrictCount = results.filter { $0.queryStatus == .restricted }.count
+        let errCount    = results.filter { $0.queryStatus == .error }.count
+        let nfCount     = results.filter { $0.queryStatus == .notFound }.count
+        var parts = ["Found: \(foundCount + restrictCount)"]
+        if restrictCount > 0 { parts.append("Restricted: \(restrictCount)") }
+        parts.append(contentsOf: ["Not found: \(nfCount)", "Errors: \(errCount)"])
+        statusMessage = "Complete — " + parts.joined(separator: "  ")
         progress  = 1
         isRunning = false
     }

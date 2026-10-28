@@ -25,11 +25,12 @@ struct EquipmentRecord: Identifiable, Codable {
     var error: String = ""
 
     enum QueryStatus: String, Codable {
-        case pending  = "Pending"
-        case running  = "Running"
-        case found    = "Found"
-        case notFound = "Not Found"
-        case error    = "Error"
+        case pending    = "Pending"
+        case running    = "Running"
+        case found      = "Found"
+        case notFound   = "Not Found"
+        case restricted = "Restricted"
+        case error      = "Error"
     }
 
     static func stub(serialNumber: String) -> EquipmentRecord {

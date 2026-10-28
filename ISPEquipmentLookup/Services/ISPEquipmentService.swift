@@ -7,6 +7,7 @@ struct ISPEquipmentService {
         case sessionTokenNotFound
         case httpError(Int, String)
         case notFound
+        case restricted(String)  // in SAP but user lacks authorization to view detail
 
         var errorDescription: String? {
             switch self {
@@ -14,6 +15,7 @@ struct ISPEquipmentService {
             case .sessionTokenNotFound:    return "Could not get SAP session token — check cookies"
             case .httpError(let c, let b): return "HTTP \(c)\(b.isEmpty ? "" : ": \(b.prefix(120))")"
             case .notFound:                return "Equipment not found for this serial number"
+            case .restricted(let equip):   return "Restricted — Equipment \(equip) exists but you lack authorization to view it"
             }
         }
     }
@@ -81,17 +83,70 @@ struct ISPEquipmentService {
         return SessionInfo(token: token, moin: moin, cookieHeader: cookieHeader)
     }
 
-    // Look up equipment by serial number using IH08 (Equipment List).
-    // SAP ITS returns plain XML (not multipart) on the first batch call to a fresh session.
-    // A warm-up batch call (state/ur) primes the session so the actual 3-step lookup
-    // receives a proper multipart response with the full IE03 screen.
+    static func acquireTokenForTransaction(_ transaction: String, settings: SettingsStore,
+                                           session: URLSession) async throws -> SessionInfo {
+        let base = settings.ispBaseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        guard let url = URL(string: "\(base)/sap/bc/gui/sap/its/webgui?~transaction=\(transaction)") else {
+            throw ServiceError.invalidURL
+        }
+        var req = URLRequest(url: url)
+        req.httpMethod = "GET"
+        req.timeoutInterval = 30
+        req.setValue(settings.ispCookies, forHTTPHeaderField: "Cookie")
+        req.setValue("text/html,application/xhtml+xml,*/*", forHTTPHeaderField: "Accept")
+
+        let (data, response) = try await session.data(for: req)
+        let httpResp = response as? HTTPURLResponse
+        let status = httpResp?.statusCode ?? -1
+        let finalURLStr = httpResp?.url?.absoluteString ?? ""
+        let raw = String(data: data, encoding: .utf8) ?? ""
+
+        let token: String
+        if let t = extractTokenFromURL(finalURLStr) {
+            token = t
+        } else {
+            let html = htmlUnescape(raw)
+            if let t = extractTokenFromURL(html) { token = t }
+            else if let t = extractTokenFromXML(html) { token = t }
+            else {
+                guard status == 200 || (status >= 300 && status < 400) else {
+                    throw ServiceError.httpError(status, String(raw.prefix(200)))
+                }
+                throw ServiceError.sessionTokenNotFound
+            }
+        }
+        let moin = extractMoin(from: raw) ?? ""
+        let saplbCookie = extractSaplbCookie(from: httpResp)
+        let cookieHeader = saplbCookie.map { "\(settings.ispCookies); \($0)" } ?? settings.ispCookies
+        return SessionInfo(token: token, moin: moin, cookieHeader: cookieHeader)
+    }
+
+    // Look up a known equipment number directly via IE03 — used when IH08 returns multiple
+    // results and we've already identified the best equipment number from the ALV grid.
+    static func lookupByEquipmentNumber(_ equipmentNumber: String,
+                                        requestedSerial: String,
+                                        sessionInfo: SessionInfo,
+                                        settings: SettingsStore,
+                                        session: URLSession) async throws -> EquipmentRecord {
+        let base = settings.ispBaseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        _ = try? await postBatch(payload: [["get": "state/ur"]], sessionInfo: sessionInfo,
+                                  base: base, session: session)
+        let payload: [[String: String]] = [
+            ["post": "value/wnd[0]/usr/txtRIEQUI-EQUNR", "content": equipmentNumber, "logic": "ignore"],
+            ["post": "vkey/0/ses[0]"],
+            ["get": "state/ur"],
+        ]
+        let xml = try await postBatch(payload: payload, sessionInfo: sessionInfo,
+                                      base: base, session: session)
+        return try parseResponse(xml: xml, requestedSerial: requestedSerial, restrictedReason: nil)
+    }
+
     static func lookup(serialNumber: String, sessionInfo: SessionInfo,
                        settings: SettingsStore,
                        session: URLSession) async throws -> EquipmentRecord {
         let base = settings.ispBaseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
 
         // Warm-up: first batch call always returns plain XML on a fresh session.
-        // This primes SAP ITS to return multipart on the next call.
         _ = try? await postBatch(payload: [["get": "state/ur"]], sessionInfo: sessionInfo,
                                   base: base, session: session)
 
@@ -100,10 +155,47 @@ struct ISPEquipmentService {
             ["post": "vkey/8/ses[0]"],
             ["get": "state/ur"],
         ]
-        let xml = try await postBatch(payload: payload, sessionInfo: sessionInfo,
+        var xml = try await postBatch(payload: payload, sessionInfo: sessionInfo,
                                       base: base, session: session)
 
-        return try parseResponse(xml: xml, requestedSerial: serialNumber)
+        let safeName = serialNumber.replacingOccurrences(of: "/", with: "_")
+        try? xml.write(toFile: "/tmp/isp_lookup_\(safeName).xml", atomically: true, encoding: .utf8)
+
+        // SAP may show a SAPMSSY0 modal popup (wnd[1]) when the user lacks authorization
+        // for all selected objects. Capture the reason text, dismiss the popup with Enter,
+        // then re-fetch state to get the equipment number from the underlying IE03 screen.
+        if isAuthPopupScreen(xml: xml) {
+            let popupReason = extractPopupMessage(from: xml)
+            let dismissPayload: [[String: String]] = [
+                ["post": "vkey/0/ses[0]"],
+                ["get": "state/ur"],
+            ]
+            let afterXml = try await postBatch(payload: dismissPayload, sessionInfo: sessionInfo,
+                                               base: base, session: session)
+            return try parseResponse(xml: afterXml, requestedSerial: serialNumber,
+                                     restrictedReason: popupReason)
+        }
+
+        // SAP returns a full-screen ALV grid (SAPLSLVC_FULLSCREEN) when more than one
+        // equipment record matches the serial. Pick the row with the highest equipment
+        // number (numerically largest = most recently created) and double-click into it.
+        if isALVListScreen(xml: xml) {
+            let rows = extractALVEquipmentRows(from: xml)
+            guard let best = rows.max(by: {
+                (Int($0.equip) ?? 0) < (Int($1.equip) ?? 0)
+            }) else {
+                throw ServiceError.notFound
+            }
+            // We have the equipment number — start a fresh IE03 session and look it up directly.
+            let ie03Session = URLSession(configuration: .ephemeral)
+            let ie03Info = try await acquireTokenForTransaction("IE03", settings: settings,
+                                                                session: ie03Session)
+            return try await lookupByEquipmentNumber(best.equip, requestedSerial: serialNumber,
+                                                     sessionInfo: ie03Info, settings: settings,
+                                                     session: ie03Session)
+        }
+
+        return try parseResponse(xml: xml, requestedSerial: serialNumber, restrictedReason: nil)
     }
 
     // MARK: - Batch POST
@@ -239,16 +331,149 @@ struct ISPEquipmentService {
         return successSteps.last?["content"] as? String
     }
 
-    static func parseResponse(xml: String, requestedSerial: String) throws -> EquipmentRecord {
+    // MARK: - Screen detection helpers
+
+    // Returns true when SAP landed on SAPMSSY0 — the system message popup screen.
+    // This fires when the user lacks authorization for all selected objects.
+    private static func isAuthPopupScreen(xml: String) -> Bool {
+        xml.contains("dynpro:'SAPMSSY0'") || xml.contains("dynpro:\"SAPMSSY0\"")
+    }
+
+    // Extract the human-readable message text from the SAP system message popup (wnd[1]).
+    // The text is in a GuiMessageWindow or GuiLabel inside wnd[1]; we capture whatever
+    // displayable text is in that window's CDATA.
+    private static func extractPopupMessage(from xml: String) -> String {
+        let html = extractCDATA(from: xml)
+        // Look for "You do not have authorization..." or any message in wnd[1]
+        // The message text is in a value= or lsdata "5": attribute near wnd[1]
+        let pattern = #"wnd\[1\].*?value="([^"]{10,}?)""#
+        if let regex = try? NSRegularExpression(pattern: pattern, options: .dotMatchesLineSeparators),
+           let match = regex.firstMatch(in: html,
+                                        range: NSRange(html.startIndex..., in: html)),
+           let range = Range(match.range(at: 1), in: html) {
+            return htmlUnescape(String(html[range]))
+        }
+        // Fallback: look for the known authorization message text
+        let authMsg = "You do not have authorization for all the selected"
+        if html.contains(authMsg) {
+            // Try to find the full sentence
+            if let start = html.range(of: authMsg) {
+                let from = start.lowerBound
+                let to   = html.index(from,
+                                      offsetBy: 120,
+                                      limitedBy: html.endIndex) ?? html.endIndex
+                return htmlUnescape(String(html[from..<to]))
+                    .replacingOccurrences(of: "\"", with: "")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            return authMsg
+        }
+        return "Authorization restricted"
+    }
+
+    // Returns true when SAP returned a full-screen ALV grid (SAPLSLVC_FULLSCREEN)
+    // — this happens when IH08 finds more than one equipment record for the serial.
+    private static func isALVListScreen(xml: String) -> Bool {
+        xml.contains("dynpro:'SAPLSLVC_FULLSCREEN'") ||
+        xml.contains("dynpro:\"SAPLSLVC_FULLSCREEN\"")
+    }
+
+    struct ALVRow {
+        let equip: String  // equipment number string, e.g. "35581906"
+        let sid: String    // SID to pass as action/3/<sid>, e.g. "wnd[0]/usr/cntlGRID1/..."
+        let rowIndex: Int
+    }
+
+    // Extract equipment numbers and their row SIDs from the SAPLSLVC_FULLSCREEN ALV grid.
+    //
+    // Equipment number cells have id="grid#C105#ROW,COL#if" and lsdata='{"5":"EQUIP_NUM",...}'.
+    // The COL in the element id maps to cell[COL-1] in the SID:
+    //   wnd[0]/usr/cntlGRID1/shellcont/shell/shellcont[1]/shell/rowcol/row[ROW]/cell[COL-1]
+    private static func extractALVEquipmentRows(from xml: String) -> [ALVRow] {
+        let html = extractCDATA(from: xml)
+        var rows: [ALVRow] = []
+
+        // Match: id="grid#C105#ROW,COL#if" ... lsdata='{"5":"EQUIP_NUM",...}'
+        // Both attributes appear on the same element within a few hundred characters.
+        guard let regex = try? NSRegularExpression(
+            pattern: #"id="grid#C105#(\d+),(\d+)#if"[^>]{0,600}lsdata='(\{[^']+\})'"#,
+            options: .dotMatchesLineSeparators) else { return rows }
+
+        let range = NSRange(html.startIndex..., in: html)
+        regex.enumerateMatches(in: html, range: range) { match, _, _ in
+            guard let match = match,
+                  let rowRange = Range(match.range(at: 1), in: html),
+                  let colRange = Range(match.range(at: 2), in: html),
+                  let ldRange  = Range(match.range(at: 3), in: html)
+            else { return }
+
+            let rowIdx = Int(html[rowRange]) ?? 0
+            let colIdx = Int(html[colRange]) ?? 0
+            let lsdata = htmlUnescape(String(html[ldRange]))
+
+            guard let valMatch = try? NSRegularExpression(pattern: #""5":"(\d{7,8})""#)
+                    .firstMatch(in: lsdata, range: NSRange(lsdata.startIndex..., in: lsdata)),
+                  let valRange = Range(valMatch.range(at: 1), in: lsdata)
+            else { return }
+
+            let equip = String(lsdata[valRange])
+            // SID for the row selection cell ends with rowcol/row[N]/ (no cell index).
+            // Clicking it selects the row; then F2 (vkey/2) opens IE03 for that row.
+            let sid = "wnd[0]/usr/cntlGRID1/shellcont/shell/shellcont[1]/shell/rowcol/row[\(rowIdx)]/"
+
+            if !rows.contains(where: { $0.equip == equip }) {
+                rows.append(ALVRow(equip: equip, sid: sid, rowIndex: rowIdx))
+            }
+        }
+
+        return rows
+    }
+
+    static func parseResponse(xml: String, requestedSerial: String,
+                              restrictedReason: String?) throws -> EquipmentRecord {
         let html = extractCDATA(from: xml)
 
         guard html.contains("id=\"M0:46:1:1::0:16\"") || html.contains("M0:46:1:1::0:16") else {
+            // If we already know this is a restricted access case, return restricted stub
+            // even if IE03 didn't load properly after popup dismissal.
+            if let reason = restrictedReason {
+                var record = EquipmentRecord.stub(serialNumber: requestedSerial)
+                record.queryStatus = .restricted
+                record.error = reason.isEmpty ? "Authorization restricted" : reason
+                return record
+            }
             throw ServiceError.notFound
         }
 
         func inputValue(_ id: String) -> String { extractInputValue(from: html, id: id) }
 
-        let equipNum  = inputValue("M0:46:1:1::0:16")
+        let equipNum = inputValue("M0:46:1:1::0:16")
+
+        // If we arrived here via a restricted popup, tag the record as restricted
+        // but still capture all available fields from the IE03 screen.
+        if let reason = restrictedReason {
+            var record = EquipmentRecord(
+                serialNumber:       requestedSerial,
+                equipmentNumber:    equipNum,
+                description:        inputValue("M0:46:1:2::0:16"),
+                userId:             inputValue("M0:46:2:3B256:1::4:62"),
+                manufacturer:       inputValue("M0:46:2:3B256:3::1:17"),
+                modelNumber:        inputValue("M0:46:2:3B256:3::2:17"),
+                acquisitionDate:    inputValue("M0:46:2:3B256:2::1:62"),
+                acquisitionValue:   inputValue("M0:46:2:3B256:2::1:17"),
+                currency:           inputValue("M0:46:2:3B256:2::1:35"),
+                inventoryNo:        inputValue("M0:46:2:3B256:1::5:17"),
+                systemStatus:       inputValue("M0:46:1:3::0:16"),
+                userStatus:         inputValue("M0:46:1:3::0:47"),
+                objectType:         inputValue("M0:46:2:3B256:1:1::0:16"),
+                manufacturerPartNo: inputValue("M0:46:2:3B256:3::3:17"),
+                validFrom:          inputValue("M0:46:1:4::0:16"),
+                category:           inputValue("M0:46:1:1::0:49"),
+                queryStatus:        .restricted)
+            record.error = reason.isEmpty ? "Authorization restricted" : reason
+            return record
+        }
+
         let mfgSerial = inputValue("M0:46:2:3B256:3::4:17")
 
         var record = EquipmentRecord(

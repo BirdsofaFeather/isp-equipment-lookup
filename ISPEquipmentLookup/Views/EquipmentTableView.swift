@@ -104,11 +104,12 @@ struct StatusBadge: View {
 
     private var color: Color {
         switch status {
-        case .pending:  return .secondary
-        case .running:  return .blue
-        case .found:    return .green
-        case .notFound: return .orange
-        case .error:    return .red
+        case .pending:    return .secondary
+        case .running:    return .blue
+        case .found:      return .green
+        case .restricted: return Color(red: 0.8, green: 0.5, blue: 0.0)
+        case .notFound:   return .orange
+        case .error:      return .red
         }
     }
 }
