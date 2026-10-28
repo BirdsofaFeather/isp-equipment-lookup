@@ -158,9 +158,6 @@ struct ISPEquipmentService {
         var xml = try await postBatch(payload: payload, sessionInfo: sessionInfo,
                                       base: base, session: session)
 
-        let safeName = serialNumber.replacingOccurrences(of: "/", with: "_")
-        try? xml.write(toFile: "/tmp/isp_lookup_\(safeName).xml", atomically: true, encoding: .utf8)
-
         // SAP may show a SAPMSSY0 modal popup (wnd[1]) when the user lacks authorization
         // for all selected objects. Capture the reason text, dismiss the popup with Enter,
         // then re-fetch state to get the equipment number from the underlying IE03 screen.

@@ -12,12 +12,14 @@
 		B003 /* EquipmentRecord.swift in Sources */ = {isa = PBXBuildFile; fileRef = A003 /* EquipmentRecord.swift */; };
 		B004 /* SettingsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A004 /* SettingsStore.swift */; };
 		B005 /* ISPEquipmentService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A005 /* ISPEquipmentService.swift */; };
+		B030 /* ChromeCookieReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = A030 /* ChromeCookieReader.swift */; };
 		B006 /* LookupViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A006 /* LookupViewModel.swift */; };
 		B007 /* MainContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A007 /* MainContentView.swift */; };
 		B008 /* EquipmentTableView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A008 /* EquipmentTableView.swift */; };
 		B009 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A009 /* SettingsView.swift */; };
 		B020 /* WebViewLoginSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A020 /* WebViewLoginSheet.swift */; };
 		B010 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A010 /* Assets.xcassets */; };
+		B040 /* libsqlite3.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = A040 /* libsqlite3.tbd */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -26,6 +28,7 @@
 		A003 /* EquipmentRecord.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EquipmentRecord.swift; sourceTree = "<group>"; };
 		A004 /* SettingsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsStore.swift; sourceTree = "<group>"; };
 		A005 /* ISPEquipmentService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ISPEquipmentService.swift; sourceTree = "<group>"; };
+		A030 /* ChromeCookieReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChromeCookieReader.swift; sourceTree = "<group>"; };
 		A006 /* LookupViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LookupViewModel.swift; sourceTree = "<group>"; };
 		A007 /* MainContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainContentView.swift; sourceTree = "<group>"; };
 		A008 /* EquipmentTableView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EquipmentTableView.swift; sourceTree = "<group>"; };
@@ -35,6 +38,7 @@
 		A011 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A012 /* ISPEquipmentLookup.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ISPEquipmentLookup.entitlements; sourceTree = "<group>"; };
 		TARGET1 /* ISPEquipmentLookup.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ISPEquipmentLookup.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A040 /* libsqlite3.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libsqlite3.tbd; path = usr/lib/libsqlite3.tbd; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -42,6 +46,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				B040 /* libsqlite3.tbd in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -53,6 +58,7 @@
 			children = (
 				APPGRP /* ISPEquipmentLookup */,
 				PRODGRP /* Products */,
+				FWGRP /* Frameworks */,
 			);
 			sourceTree = "<group>";
 		};
@@ -62,6 +68,14 @@
 				TARGET1 /* ISPEquipmentLookup.app */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		FWGRP /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				A040 /* libsqlite3.tbd */,
+			);
+			name = Frameworks;
 			sourceTree = "<group>";
 		};
 		APPGRP /* ISPEquipmentLookup */ = {
@@ -93,6 +107,7 @@
 			isa = PBXGroup;
 			children = (
 				A005 /* ISPEquipmentService.swift */,
+				A030 /* ChromeCookieReader.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -190,6 +205,7 @@
 				B003 /* EquipmentRecord.swift in Sources */,
 				B004 /* SettingsStore.swift in Sources */,
 				B005 /* ISPEquipmentService.swift in Sources */,
+				B030 /* ChromeCookieReader.swift in Sources */,
 				B006 /* LookupViewModel.swift in Sources */,
 				B007 /* MainContentView.swift in Sources */,
 				B008 /* EquipmentTableView.swift in Sources */,

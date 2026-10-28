@@ -4,6 +4,8 @@ struct SettingsView: View {
     @Environment(AppState.self) private var appState
     @Environment(\.dismiss) private var dismiss
     @State private var showWebLogin = false
+    @State private var chromeStatus: String? = nil
+    @State private var chromeStatusIsError = false
 
     var body: some View {
         @Bindable var s = appState.settings
@@ -30,18 +32,24 @@ struct SettingsView: View {
                     SettingsSection(title: "Session Cookies") {
                         VStack(alignment: .leading, spacing: 8) {
                             HStack(alignment: .top) {
-                                Text("Sign in via browser (experimental — may not work with device compliance SSO) or paste cookies manually from your browser's network inspector.")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                    .fixedSize(horizontal: false, vertical: true)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Import directly from Chrome, or paste cookies manually from your browser's network inspector.")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                    if let msg = chromeStatus {
+                                        Text(msg)
+                                            .font(.caption)
+                                            .foregroundStyle(chromeStatusIsError ? Color.red : Color.green)
+                                    }
+                                }
                                 Spacer()
                                 Button {
-                                    showWebLogin = true
+                                    importFromChrome(settings: appState.settings)
                                 } label: {
-                                    Label("Sign In…", systemImage: "globe")
+                                    Label("Refresh from Chrome", systemImage: "arrow.clockwise")
                                         .font(.caption)
                                 }
-                                .disabled(s.ispBaseURL.isEmpty)
                             }
 
                             TextEditor(text: $s.ispCookies)
@@ -82,6 +90,26 @@ struct SettingsView: View {
         .sheet(isPresented: $showWebLogin) {
             WebViewLoginSheet()
                 .environment(appState)
+        }
+    }
+
+    private func importFromChrome(settings: SettingsStore) {
+        chromeStatus = "Reading Chrome cookies…"
+        chromeStatusIsError = false
+        Task {
+            do {
+                let cookies = try ChromeCookieReader.readISPCookies()
+                await MainActor.run {
+                    settings.ispCookies = cookies
+                    chromeStatus = "Cookies imported successfully."
+                    chromeStatusIsError = false
+                }
+            } catch {
+                await MainActor.run {
+                    chromeStatus = error.localizedDescription
+                    chromeStatusIsError = true
+                }
+            }
         }
     }
 }
