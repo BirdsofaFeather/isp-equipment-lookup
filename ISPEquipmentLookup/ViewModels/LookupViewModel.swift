@@ -62,6 +62,22 @@ class LookupViewModel {
         runTask = Task { await runAsync(settings: settings) }
     }
 
+    // Executes `body`. If it throws an HTTP 400 or 500, tries once to refresh cookies
+    // from Chrome and retries. Updates settings.ispCookies on success so the UI reflects it.
+    private func withCookieRefresh<T>(settings: SettingsStore,
+                                      _ body: @Sendable () async throws -> T) async throws -> T {
+        do {
+            return try await body()
+        } catch ISPEquipmentService.ServiceError.httpError(let code, _) where code == 400 || code == 500 {
+            // Attempt a silent cookie refresh from Chrome
+            let fresh = try? ChromeCookieReader.readISPCookies()
+            guard let fresh else { throw ISPEquipmentService.ServiceError.httpError(code, "Session expired — refresh cookies in Settings") }
+            settings.ispCookies = fresh
+            statusMessage = "Cookies refreshed — retrying…"
+            return try await body()
+        }
+    }
+
     func cancel() {
         runTask?.cancel()
         runTask = nil
@@ -110,11 +126,13 @@ class LookupViewModel {
                         }
                         let taskSession = URLSession(configuration: .ephemeral)
                         do {
-                            let sessionInfo = try await ISPEquipmentService.acquireToken(
-                                settings: settings, session: taskSession)
-                            return (idx, try await ISPEquipmentService.lookup(
-                                serialNumber: sn, sessionInfo: sessionInfo,
-                                settings: settings, session: taskSession))
+                            return try await self.withCookieRefresh(settings: settings) {
+                                let sessionInfo = try await ISPEquipmentService.acquireToken(
+                                    settings: settings, session: taskSession)
+                                return (idx, try await ISPEquipmentService.lookup(
+                                    serialNumber: sn, sessionInfo: sessionInfo,
+                                    settings: settings, session: taskSession))
+                            }
                         } catch ISPEquipmentService.ServiceError.notFound {
                             var r = EquipmentRecord.stub(serialNumber: sn)
                             r.equipmentNumber = "i8pi8pi8p"; r.queryStatus = .notFound
@@ -167,12 +185,14 @@ class LookupViewModel {
                         }
                         let taskSession = URLSession(configuration: .ephemeral)
                         do {
-                            let sessionInfo = try await ISPEquipmentService.acquireToken(
-                                settings: settings, session: taskSession)
-                            let records = try await ISPEquipmentService.batchLookup(
-                                serialNumbers: chunk.serials, sessionInfo: sessionInfo,
-                                settings: settings, session: taskSession)
-                            return records.enumerated().map { (i, r) in (chunk.startIdx + i, r) }
+                            return try await self.withCookieRefresh(settings: settings) {
+                                let sessionInfo = try await ISPEquipmentService.acquireToken(
+                                    settings: settings, session: taskSession)
+                                let records = try await ISPEquipmentService.batchLookup(
+                                    serialNumbers: chunk.serials, sessionInfo: sessionInfo,
+                                    settings: settings, session: taskSession)
+                                return records.enumerated().map { (i, r) in (chunk.startIdx + i, r) }
+                            }
                         } catch {
                             return chunk.serials.enumerated().map { (i, sn) in
                                 var r = EquipmentRecord.stub(serialNumber: sn)
