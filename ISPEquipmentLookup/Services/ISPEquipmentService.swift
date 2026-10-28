@@ -496,6 +496,7 @@ struct ISPEquipmentService {
             queryStatus:        .found)
 
         if record.equipmentNumber.isEmpty && record.manufacturer.isEmpty {
+            record.equipmentNumber = "i8pi8pi8p"
             record.queryStatus = .notFound
         }
         return record

@@ -18,6 +18,7 @@
 		B008 /* EquipmentTableView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A008 /* EquipmentTableView.swift */; };
 		B009 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A009 /* SettingsView.swift */; };
 		B020 /* WebViewLoginSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A020 /* WebViewLoginSheet.swift */; };
+		B011 /* AppIcon.icns in Resources */ = {isa = PBXBuildFile; fileRef = A011b /* AppIcon.icns */; };
 		B010 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A010 /* Assets.xcassets */; };
 		B040 /* libsqlite3.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = A040 /* libsqlite3.tbd */; };
 /* End PBXBuildFile section */
@@ -35,6 +36,7 @@
 		A009 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		A020 /* WebViewLoginSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebViewLoginSheet.swift; sourceTree = "<group>"; };
 		A010 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		A011b /* AppIcon.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = AppIcon.icns; sourceTree = "<group>"; };
 		A011 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A012 /* ISPEquipmentLookup.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ISPEquipmentLookup.entitlements; sourceTree = "<group>"; };
 		TARGET1 /* ISPEquipmentLookup.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ISPEquipmentLookup.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -88,6 +90,7 @@
 				VMGRP /* ViewModels */,
 				VIEWGRP /* Views */,
 				A010 /* Assets.xcassets */,
+				A011b /* AppIcon.icns */,
 				A011 /* Info.plist */,
 				A012 /* ISPEquipmentLookup.entitlements */,
 			);
@@ -189,6 +192,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				B011 /* AppIcon.icns in Resources */,
 				B010 /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -335,7 +339,7 @@
 		DBGTGT /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_APPICON_NAME = "";
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = ISPEquipmentLookup/ISPEquipmentLookup.entitlements;
 				CODE_SIGN_STYLE = Automatic;
@@ -360,7 +364,7 @@
 		RELTGT /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_APPICON_NAME = "";
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = ISPEquipmentLookup/ISPEquipmentLookup.entitlements;
 				CODE_SIGN_STYLE = Automatic;

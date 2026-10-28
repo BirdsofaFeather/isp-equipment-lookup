@@ -116,6 +116,7 @@ class LookupViewModel {
                             settings: settings, session: taskSession))
                     } catch ISPEquipmentService.ServiceError.notFound {
                         var r = EquipmentRecord.stub(serialNumber: sn)
+                        r.equipmentNumber = "i8pi8pi8p"
                         r.queryStatus = .notFound
                         return (idx, r)
                     } catch ISPEquipmentService.ServiceError.restricted(let equip) {
