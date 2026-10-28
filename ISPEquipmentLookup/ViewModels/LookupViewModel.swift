@@ -62,16 +62,22 @@ class LookupViewModel {
         runTask = Task { await runAsync(settings: settings) }
     }
 
+    // Thrown when cookie refresh fails — signals the run loop to abort entirely.
+    private struct SessionExpiredError: Error {
+        let message: String
+    }
+
     // Executes `body`. If it throws an HTTP 400 or 500, tries once to refresh cookies
-    // from Chrome and retries. Updates settings.ispCookies on success so the UI reflects it.
+    // from Chrome and retries. If refresh fails, throws SessionExpiredError to abort the run.
     private func withCookieRefresh<T>(settings: SettingsStore,
                                       _ body: @Sendable () async throws -> T) async throws -> T {
         do {
             return try await body()
         } catch ISPEquipmentService.ServiceError.httpError(let code, _) where code == 400 || code == 500 {
-            // Attempt a silent cookie refresh from Chrome
             let fresh = try? ChromeCookieReader.readISPCookies()
-            guard let fresh else { throw ISPEquipmentService.ServiceError.httpError(code, "Session expired — refresh cookies in Settings") }
+            guard let fresh else {
+                throw SessionExpiredError(message: "Session expired — refresh cookies in Settings (gear icon)")
+            }
             settings.ispCookies = fresh
             statusMessage = "Cookies refreshed — retrying…"
             return try await body()
@@ -105,10 +111,12 @@ class LookupViewModel {
         let concurrency = max(1, settings.concurrency)
         var completed = 0
 
+        var fatalError: String? = nil
+
         if settings.fetchFullDetail {
             // Full detail: use the original single-serial lookup (IE03 detail per record).
             // Each serial gets its own isolated session — correct and already battle-tested.
-            await withTaskGroup(of: (Int, EquipmentRecord).self) { group in
+            await withThrowingTaskGroup(of: (Int, EquipmentRecord).self) { group in
                 var inFlight = 0
                 var serialIndex = 0
 
@@ -125,40 +133,47 @@ class LookupViewModel {
                             return (idx, r)
                         }
                         let taskSession = URLSession(configuration: .ephemeral)
-                        do {
-                            return try await self.withCookieRefresh(settings: settings) {
+                        return try await self.withCookieRefresh(settings: settings) {
+                            do {
                                 let sessionInfo = try await ISPEquipmentService.acquireToken(
                                     settings: settings, session: taskSession)
                                 return (idx, try await ISPEquipmentService.lookup(
                                     serialNumber: sn, sessionInfo: sessionInfo,
                                     settings: settings, session: taskSession))
+                            } catch ISPEquipmentService.ServiceError.notFound {
+                                var r = EquipmentRecord.stub(serialNumber: sn)
+                                r.equipmentNumber = "i8pi8pi8p"; r.queryStatus = .notFound
+                                return (idx, r)
+                            } catch ISPEquipmentService.ServiceError.restricted(let equip) {
+                                var r = EquipmentRecord.stub(serialNumber: sn)
+                                r.equipmentNumber = equip; r.queryStatus = .restricted
+                                r.error = "Authorization restricted"
+                                return (idx, r)
+                            } catch let e as SessionExpiredError {
+                                throw e  // propagate to abort the run
+                            } catch {
+                                var r = EquipmentRecord.stub(serialNumber: sn)
+                                r.queryStatus = .error; r.error = error.localizedDescription
+                                return (idx, r)
                             }
-                        } catch ISPEquipmentService.ServiceError.notFound {
-                            var r = EquipmentRecord.stub(serialNumber: sn)
-                            r.equipmentNumber = "i8pi8pi8p"; r.queryStatus = .notFound
-                            return (idx, r)
-                        } catch ISPEquipmentService.ServiceError.restricted(let equip) {
-                            var r = EquipmentRecord.stub(serialNumber: sn)
-                            r.equipmentNumber = equip; r.queryStatus = .restricted
-                            r.error = "Authorization restricted"
-                            return (idx, r)
-                        } catch {
-                            var r = EquipmentRecord.stub(serialNumber: sn)
-                            r.queryStatus = .error; r.error = error.localizedDescription
-                            return (idx, r)
                         }
                     }
                 }
 
                 for _ in 0..<concurrency { addNext() }
-                for await (idx, record) in group {
-                    if Task.isCancelled { break }
-                    results[idx] = record
-                    completed += 1; inFlight -= 1
-                    progress = Double(completed) / Double(serials.count)
-                    statusMessage = "Done \(completed)/\(serials.count)"
-                    addNext()
-                }
+                do {
+                    for try await (idx, record) in group {
+                        if Task.isCancelled { break }
+                        results[idx] = record
+                        completed += 1; inFlight -= 1
+                        progress = Double(completed) / Double(serials.count)
+                        statusMessage = "Done \(completed)/\(serials.count)"
+                        addNext()
+                    }
+                } catch let e as SessionExpiredError {
+                    group.cancelAll()
+                    fatalError = e.message
+                } catch {}
             }
         } else {
             // List only: batch mode — 8 serials per IH08 round-trip, fast.
@@ -167,7 +182,7 @@ class LookupViewModel {
                 return (startIdx: start, serials: Array(serials[start..<end]))
             }
 
-            await withTaskGroup(of: [(Int, EquipmentRecord)].self) { group in
+            await withThrowingTaskGroup(of: [(Int, EquipmentRecord)].self) { group in
                 var inFlight = 0
                 var chunkIndex = 0
 
@@ -184,35 +199,50 @@ class LookupViewModel {
                             }
                         }
                         let taskSession = URLSession(configuration: .ephemeral)
-                        do {
-                            return try await self.withCookieRefresh(settings: settings) {
+                        return try await self.withCookieRefresh(settings: settings) {
+                            do {
                                 let sessionInfo = try await ISPEquipmentService.acquireToken(
                                     settings: settings, session: taskSession)
                                 let records = try await ISPEquipmentService.batchLookup(
                                     serialNumbers: chunk.serials, sessionInfo: sessionInfo,
                                     settings: settings, session: taskSession)
                                 return records.enumerated().map { (i, r) in (chunk.startIdx + i, r) }
-                            }
-                        } catch {
-                            return chunk.serials.enumerated().map { (i, sn) in
-                                var r = EquipmentRecord.stub(serialNumber: sn)
-                                r.queryStatus = .error; r.error = error.localizedDescription
-                                return (chunk.startIdx + i, r)
+                            } catch let e as SessionExpiredError {
+                                throw e  // propagate to abort the run
+                            } catch {
+                                return chunk.serials.enumerated().map { (i, sn) in
+                                    var r = EquipmentRecord.stub(serialNumber: sn)
+                                    r.queryStatus = .error; r.error = error.localizedDescription
+                                    return (chunk.startIdx + i, r)
+                                }
                             }
                         }
                     }
                 }
 
                 for _ in 0..<concurrency { addNextChunk() }
-                for await pairs in group {
-                    if Task.isCancelled { break }
-                    for (idx, record) in pairs { results[idx] = record }
-                    completed += pairs.count; inFlight -= 1
-                    progress = Double(completed) / Double(serials.count)
-                    statusMessage = "Done \(completed)/\(serials.count)"
-                    addNextChunk()
-                }
+                do {
+                    for try await pairs in group {
+                        if Task.isCancelled { break }
+                        for (idx, record) in pairs { results[idx] = record }
+                        completed += pairs.count; inFlight -= 1
+                        progress = Double(completed) / Double(serials.count)
+                        statusMessage = "Done \(completed)/\(serials.count)"
+                        addNextChunk()
+                    }
+                } catch let e as SessionExpiredError {
+                    group.cancelAll()
+                    fatalError = e.message
+                } catch {}
             }
+        }
+
+        if let msg = fatalError {
+            errorMessage = msg
+            statusMessage = "Stopped — \(completed) of \(serials.count) completed before session expired"
+            progress  = Double(completed) / Double(serials.count)
+            isRunning = false
+            return
         }
 
         let foundCount  = results.filter { $0.queryStatus == .found }.count
