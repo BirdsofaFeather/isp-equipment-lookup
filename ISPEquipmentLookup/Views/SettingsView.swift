@@ -3,6 +3,8 @@ import SwiftUI
 struct SettingsView: View {
     @Environment(AppState.self) private var appState
     @Environment(\.dismiss) private var dismiss
+    @State private var chromeStatus: String? = nil
+    @State private var chromeStatusIsError = false
 
     var body: some View {
         @Bindable var s = appState.settings
@@ -27,11 +29,27 @@ struct SettingsView: View {
                     }
 
                     SettingsSection(title: "Session Cookies") {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("Paste the Cookie header value from your browser's network inspector while logged into SAP ISP WebGUI.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack(alignment: .top) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Import directly from Chrome, or paste cookies manually from your browser's network inspector.")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                    if let msg = chromeStatus {
+                                        Text(msg)
+                                            .font(.caption)
+                                            .foregroundStyle(chromeStatusIsError ? Color.red : Color.green)
+                                    }
+                                }
+                                Spacer()
+                                Button {
+                                    importFromChrome(settings: appState.settings)
+                                } label: {
+                                    Label("Refresh from Chrome", systemImage: "arrow.clockwise")
+                                        .font(.caption)
+                                }
+                            }
 
                             TextEditor(text: $s.ispCookies)
                                 .font(.system(.caption, design: .monospaced))
@@ -68,6 +86,26 @@ struct SettingsView: View {
             .padding(.horizontal, 20).padding(.vertical, 12)
         }
         .frame(width: 520, height: 480)
+    }
+
+    private func importFromChrome(settings: SettingsStore) {
+        chromeStatus = "Reading Chrome cookies…"
+        chromeStatusIsError = false
+        Task {
+            do {
+                let cookies = try ChromeCookieReader.readISPCookies()
+                await MainActor.run {
+                    settings.ispCookies = cookies
+                    chromeStatus = "Cookies imported successfully."
+                    chromeStatusIsError = false
+                }
+            } catch {
+                await MainActor.run {
+                    chromeStatus = error.localizedDescription
+                    chromeStatusIsError = true
+                }
+            }
+        }
     }
 }
 
