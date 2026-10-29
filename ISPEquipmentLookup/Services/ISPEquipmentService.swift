@@ -489,7 +489,9 @@ struct ISPEquipmentService {
 
         // If the result is a single IE03 screen (only one match total), parse it
         // and correlate back to the one serial that matched.
-        if xml.contains("id=\"M0:46:1:1::0:16\"") || xml.contains("M0:46:1:1::0:16") {
+        let ie03Html = extractCDATA(from: xml)
+        let ie03Session = detectSessionNumber(from: ie03Html) ?? "46"
+        if ie03Html.contains("id=\"M0:\(ie03Session):1:1::0:16\"") || ie03Html.contains("M0:\(ie03Session):1:1::0:16") {
             let record = try parseResponse(xml: xml, requestedSerial: serialNumbers.first ?? "", restrictedReason: nil)
             return serialNumbers.map { sn in
                 if sn.caseInsensitiveCompare(record.serialNumber) == .orderedSame
@@ -628,9 +630,13 @@ struct ISPEquipmentService {
                               restrictedReason: String?) throws -> EquipmentRecord {
         let html = extractCDATA(from: xml)
 
-        guard html.contains("id=\"M0:46:1:1::0:16\"") || html.contains("M0:46:1:1::0:16") else {
-            // If we already know this is a restricted access case, return restricted stub
-            // even if IE03 didn't load properly after popup dismissal.
+        // The session counter in field IDs (e.g. "M0:46:...") is assigned server-side
+        // per new WebGUI session and is not always 46. Detect it from the first occurrence.
+        let sessionNum = detectSessionNumber(from: html) ?? "46"
+
+        func fid(_ suffix: String) -> String { "M0:\(sessionNum):\(suffix)" }
+
+        guard html.contains("id=\"\(fid("1:1::0:16"))\"") || html.contains(fid("1:1::0:16")) else {
             if let reason = restrictedReason {
                 var record = EquipmentRecord.stub(serialNumber: requestedSerial)
                 record.queryStatus = .restricted
@@ -640,9 +646,9 @@ struct ISPEquipmentService {
             throw ServiceError.notFound
         }
 
-        func inputValue(_ id: String) -> String { extractInputValue(from: html, id: id) }
+        func inputValue(_ suffix: String) -> String { extractInputValue(from: html, id: fid(suffix)) }
 
-        let equipNum = inputValue("M0:46:1:1::0:16")
+        let equipNum = inputValue("1:1::0:16")
 
         // If we arrived here via a restricted popup, tag the record as restricted
         // but still capture all available fields from the IE03 screen.
@@ -650,44 +656,44 @@ struct ISPEquipmentService {
             var record = EquipmentRecord(
                 serialNumber:       requestedSerial,
                 equipmentNumber:    equipNum,
-                description:        inputValue("M0:46:1:2::0:16"),
-                userId:             inputValue("M0:46:2:3B256:1::4:62"),
-                manufacturer:       inputValue("M0:46:2:3B256:3::1:17"),
-                modelNumber:        inputValue("M0:46:2:3B256:3::2:17"),
-                acquisitionDate:    inputValue("M0:46:2:3B256:2::1:62"),
-                acquisitionValue:   inputValue("M0:46:2:3B256:2::1:17"),
-                currency:           inputValue("M0:46:2:3B256:2::1:35"),
-                inventoryNo:        inputValue("M0:46:2:3B256:1::5:17"),
-                systemStatus:       inputValue("M0:46:1:3::0:16"),
-                userStatus:         inputValue("M0:46:1:3::0:47"),
-                objectType:         inputValue("M0:46:2:3B256:1:1::0:16"),
-                manufacturerPartNo: inputValue("M0:46:2:3B256:3::3:17"),
-                validFrom:          inputValue("M0:46:1:4::0:16"),
-                category:           inputValue("M0:46:1:1::0:49"),
+                description:        inputValue("1:2::0:16"),
+                userId:             inputValue("2:3B256:1::4:62"),
+                manufacturer:       inputValue("2:3B256:3::1:17"),
+                modelNumber:        inputValue("2:3B256:3::2:17"),
+                acquisitionDate:    inputValue("2:3B256:2::1:62"),
+                acquisitionValue:   inputValue("2:3B256:2::1:17"),
+                currency:           inputValue("2:3B256:2::1:35"),
+                inventoryNo:        inputValue("2:3B256:1::5:17"),
+                systemStatus:       inputValue("1:3::0:16"),
+                userStatus:         inputValue("1:3::0:47"),
+                objectType:         inputValue("2:3B256:1:1::0:16"),
+                manufacturerPartNo: inputValue("2:3B256:3::3:17"),
+                validFrom:          inputValue("1:4::0:16"),
+                category:           inputValue("1:1::0:49"),
                 queryStatus:        .restricted)
             record.error = reason.isEmpty ? "Authorization restricted" : reason
             return record
         }
 
-        let mfgSerial = inputValue("M0:46:2:3B256:3::4:17")
+        let mfgSerial = inputValue("2:3B256:3::4:17")
 
         var record = EquipmentRecord(
             serialNumber:       mfgSerial.isEmpty ? requestedSerial : mfgSerial,
             equipmentNumber:    equipNum,
-            description:        inputValue("M0:46:1:2::0:16"),
-            userId:             inputValue("M0:46:2:3B256:1::4:62"),
-            manufacturer:       inputValue("M0:46:2:3B256:3::1:17"),
-            modelNumber:        inputValue("M0:46:2:3B256:3::2:17"),
-            acquisitionDate:    inputValue("M0:46:2:3B256:2::1:62"),
-            acquisitionValue:   inputValue("M0:46:2:3B256:2::1:17"),
-            currency:           inputValue("M0:46:2:3B256:2::1:35"),
-            inventoryNo:        inputValue("M0:46:2:3B256:1::5:17"),
-            systemStatus:       inputValue("M0:46:1:3::0:16"),
-            userStatus:         inputValue("M0:46:1:3::0:47"),
-            objectType:         inputValue("M0:46:2:3B256:1:1::0:16"),
-            manufacturerPartNo: inputValue("M0:46:2:3B256:3::3:17"),
-            validFrom:          inputValue("M0:46:1:4::0:16"),
-            category:           inputValue("M0:46:1:1::0:49"),
+            description:        inputValue("1:2::0:16"),
+            userId:             inputValue("2:3B256:1::4:62"),
+            manufacturer:       inputValue("2:3B256:3::1:17"),
+            modelNumber:        inputValue("2:3B256:3::2:17"),
+            acquisitionDate:    inputValue("2:3B256:2::1:62"),
+            acquisitionValue:   inputValue("2:3B256:2::1:17"),
+            currency:           inputValue("2:3B256:2::1:35"),
+            inventoryNo:        inputValue("2:3B256:1::5:17"),
+            systemStatus:       inputValue("1:3::0:16"),
+            userStatus:         inputValue("1:3::0:47"),
+            objectType:         inputValue("2:3B256:1:1::0:16"),
+            manufacturerPartNo: inputValue("2:3B256:3::3:17"),
+            validFrom:          inputValue("1:4::0:16"),
+            category:           inputValue("1:1::0:49"),
             queryStatus:        .found)
 
         if record.equipmentNumber.isEmpty && record.manufacturer.isEmpty {
@@ -762,6 +768,17 @@ struct ISPEquipmentService {
     }
 
     // MARK: - HTML/XML helpers
+
+    // Extract the SAP WebGUI session counter from an IE03 HTML response.
+    // Field IDs are formatted "M0:NN:..." where NN is assigned server-side per session
+    // and is not always 46. We detect it by matching the first M0:NN: occurrence.
+    private static func detectSessionNumber(from html: String) -> String? {
+        guard let range = html.range(of: "M0:") else { return nil }
+        let after = html[range.upperBound...]
+        guard let colon = after.firstIndex(of: ":") else { return nil }
+        let num = String(after[after.startIndex..<colon])
+        return num.isEmpty || num.contains("\"") ? nil : num
+    }
 
     private static func extractCDATA(from xml: String) -> String {
         var parts: [String] = []
