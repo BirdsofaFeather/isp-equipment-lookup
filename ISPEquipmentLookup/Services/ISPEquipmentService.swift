@@ -333,6 +333,7 @@ struct ISPEquipmentService {
 
     // MARK: - Screen detection helpers
 
+
     // Returns true when SAP landed on SAPMSSY0 — the system message popup screen.
     // This fires when the user lacks authorization for all selected objects.
     private static func isAuthPopupScreen(xml: String) -> Bool {
@@ -773,11 +774,14 @@ struct ISPEquipmentService {
     // Field IDs are formatted "M0:NN:..." where NN is assigned server-side per session
     // and is not always 46. We detect it by matching the first M0:NN: occurrence.
     private static func detectSessionNumber(from html: String) -> String? {
-        guard let range = html.range(of: "M0:") else { return nil }
-        let after = html[range.upperBound...]
-        guard let colon = after.firstIndex(of: ":") else { return nil }
-        let num = String(after[after.startIndex..<colon])
-        return num.isEmpty || num.contains("\"") ? nil : num
+        // Field IDs have the form M0:NN:... where NN is all digits followed immediately by :.
+        // Use regex to find the first occurrence of that exact pattern (avoids matching
+        // ScreenId:'M0:46' which has a quote after the number, not a colon).
+        guard let regex = try? NSRegularExpression(pattern: #"M0:(\d+):"#),
+              let match = regex.firstMatch(in: html, range: NSRange(html.startIndex..., in: html)),
+              let range = Range(match.range(at: 1), in: html)
+        else { return nil }
+        return String(html[range])
     }
 
     private static func extractCDATA(from xml: String) -> String {
